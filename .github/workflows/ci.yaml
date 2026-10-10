@@ -1,0 +1,51 @@
+name: Apps CI
+
+# Runs both services on every PR, so the required checks always report
+# (path filters here would leave required checks stuck on "waiting").
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [service-s3, service-sqs]
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Python syntax check
+        run: python -m py_compile app.py
+
+      - name: Docker build
+        run: docker build -t ${{ matrix.service }}:ci .
+
+      # ---- Optional: Snyk ----
+      - uses: snyk/actions/setup@master
+
+      - name: Snyk dependency scan (blocks on high/critical)
+        run: snyk test --file=requirements.txt --package-manager=pip --severity-threshold=high
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Snyk container scan (report only)
+        continue-on-error: true   # base-image CVEs are reported but don't block the PR
+        run: snyk container test ${{ matrix.service }}:ci --file=Dockerfile --severity-threshold=high
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
